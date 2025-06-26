@@ -2,10 +2,7 @@ import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.*;
-import java.util.Date;
-import java.util.Calendar;
-import java.util.Enumeration;
-import java.util.Stack;
+import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -135,8 +132,24 @@ public class ExcelParser {
     }
 
     private String getFileExtension(String fileName) {
+        String[] excelExtensions = {"XLS", "XSLX", "XLSM", "XLAM"};
+        String[] wordExtensions = {"DOC", "DOCX"};
+        String[] powerpointExtensions = {"PPTX", "PPTM", "PPT"};
         int lastDot = fileName.lastIndexOf('.');
-        return (lastDot > 0) ? fileName.substring(lastDot + 1).toUpperCase() : "";
+        String extension = (lastDot > 0) ? fileName.substring(lastDot + 1).toUpperCase() : "";
+
+        if (Arrays.asList(excelExtensions).contains(extension)) {
+            return "MS Excel";
+        } else if (Arrays.asList(wordExtensions).contains(extension)) {
+            return "MS Word";
+        } else if (Arrays.asList(powerpointExtensions).contains(extension)) {
+            return "MS Powerpoint";
+        } else if (extension.equals("MSG")) {
+            return "Outlook Item";
+        } else {
+            return extension;
+        }
+
     }
 
     private void parseHelper(int col1, int col2, int col3, FileInputStream fis, Workbook workbook, Sheet sheet, Stack<File> stack, int rowNum) throws IOException {
@@ -183,7 +196,7 @@ public class ExcelParser {
                 String docType = getFileExtension(fileName).toUpperCase();
 
                 Row row = sheet.createRow(rowNum++);
-                row.createCell(col1).setCellValue(String.valueOf(year));  //E
+                row.createCell(col1).setCellValue(year);  //E
                 row.createCell(col2).setCellValue(deliverable); //F
                 row.createCell(col3).setCellValue(docType); // H
                 System.out.println("Parsed File " + ++filesParsed + ": "  + fileName);
@@ -198,6 +211,6 @@ public class ExcelParser {
         fos.close();
         workbook.close();
 
-        System.out.println("Complete");
+        System.out.println("Complete. Parsed " + filesParsed + " files.");
     }
 }
