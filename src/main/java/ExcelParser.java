@@ -4,67 +4,200 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.io.*;
 import java.util.Date;
 import java.util.Calendar;
+import java.util.Enumeration;
+import java.util.Stack;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+
 
 public class ExcelParser {
 
-    private static final String EXCEL_PATH = "INSERT EXCEL PATH";
-    private static final String FOLDER_PATH = "INSERT FOLDER PATH";
-    private static final String SHEET_NAME = "Sheet1";
+    //Use \\ instead of \ for file escape sequences
 
-    public static void main(String[] args) {
+    private final String EXCEL_PATH;
+    private final String FOLDER_PATH;
+    private final String SHEET_NAME;
+    private final int IGNORE_YEAR; // Ignores
+
+    public ExcelParser(String excelPath, String folderPath, String sheetName) {
+        EXCEL_PATH = excelPath;
+        FOLDER_PATH = folderPath;
+        SHEET_NAME = sheetName;
+        IGNORE_YEAR = 9999;
+    }
+
+    public ExcelParser(String excelPath, String folderPath, String sheetName, int ignoreYear) {
+        EXCEL_PATH = excelPath;
+        FOLDER_PATH = folderPath;
+        SHEET_NAME = sheetName;
+        IGNORE_YEAR = ignoreYear;
+    }
+
+    /**
+     * Parses file name, year, and extension into the class Excel sheet for each file.
+     *
+     * Uses default columns and avoids overwriting cells.
+     *
+     */
+    public void parseSafe() {
+        parseSafe(4, 5, 7);
+    }
+
+    /**
+     * Parses file name, year, and extension into the class Excel sheet for each file.
+     *
+     * Uses specified columns and avoids overwriting cells.
+     *
+     * @param col1 column to write file name into
+     * @param col2 column to write year into
+     * @param col3 column to write file extension into
+     */
+    public void parseSafe(int col1, int col2, int col3) {
         try {
             FileInputStream fis = new FileInputStream(EXCEL_PATH);
             Workbook workbook = new XSSFWorkbook(fis);
             Sheet sheet = workbook.getSheet(SHEET_NAME);
             if (sheet == null) {
-                System.err.println("Sheet not found: " + SHEET_NAME);
+                System.err.println("Sheet " + SHEET_NAME + " not found");
                 return;
             }
 
             File folder = new File(FOLDER_PATH);
             if (!folder.exists() || !folder.isDirectory()) {
-                System.err.println("Invalid folder path: " + FOLDER_PATH);
+                System.err.println("Invalid path: " + FOLDER_PATH);
                 return;
             }
 
+            Stack<File> stack = new Stack<>();
+            stack.push(folder);
             int rowNum = sheet.getLastRowNum() + 1;
-            for (File file : folder.listFiles()) {
-                if (file.isFile()) {
-                    Calendar cal = Calendar.getInstance();
-                    cal.setTime(new Date(file.lastModified()));
-                    String year = String.valueOf(cal.get(Calendar.YEAR));
-
-                    String fileName = file.getName();
-                    String deliverable = getDeliverableName(fileName);
-                    String docType = getFileExtension(fileName).toUpperCase();
-
-                    Row row = sheet.createRow(rowNum++);
-                    row.createCell(4).setCellValue(year);  //E
-                    row.createCell(5).setCellValue(deliverable); //F
-                    row.createCell(7).setCellValue(docType); // H
-                }
-            }
-
-            fis.close();
-            FileOutputStream fos = new FileOutputStream(EXCEL_PATH);
-            workbook.write(fos);
-            fos.close();
-            workbook.close();
-
-            System.out.println("Excel updated successfully.");
+            parseHelper(col1, col2, col3, fis, workbook, sheet, stack, rowNum);
 
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    private static String getDeliverableName(String fileName) {
+    /**
+     * Parses file name, year, and extension into the class Excel sheet for each file
+     *
+     * Uses default columns and starts from specified row.
+     *
+     * WARNING: WILL OVERWRITE EXISTING CELLS IF param startingRow SPECIFIES IT
+     *
+     * @param startingRow row to start writing from
+     */
+    public void parse(int startingRow) {
+        int col1 = 4, col2 = 5, col3 = 7;
+        parse(col1, col2, col3, startingRow);
+    }
+
+    /**
+     * Parses file name, year, and extension into the class excel sheet for each file
+     *
+     * Uses default columns and starts from specified row.
+     *
+     * @param col1 column to write file name into
+     * @param col2 column to write year into
+     * @param col3 column to write file extension into
+     * @param startingRow row to start writing from
+     */
+    public void parse(int col1, int col2, int col3, int startingRow) {
+        try {
+            FileInputStream fis = new FileInputStream(EXCEL_PATH);
+            Workbook workbook = new XSSFWorkbook(fis);
+            Sheet sheet = workbook.getSheet(SHEET_NAME);
+            if (sheet == null) {
+                System.err.println("Sheet " + SHEET_NAME + " not found");
+                return;
+            }
+
+            File folder = new File(FOLDER_PATH);
+            if (!folder.exists() || !folder.isDirectory()) {
+                System.err.println("Invalid path: " + FOLDER_PATH);
+                return;
+            }
+
+            Stack<File> stack = new Stack<>();
+            stack.push(folder);
+            parseHelper(col1, col2, col3, fis, workbook, sheet, stack, startingRow);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+
+    private String getDeliverableName(String fileName) {
         int lastDot = fileName.lastIndexOf('.');
         return (lastDot > 0) ? fileName.substring(0, lastDot) : fileName;
     }
 
-    private static String getFileExtension(String fileName) {
+    private String getFileExtension(String fileName) {
         int lastDot = fileName.lastIndexOf('.');
-        return (lastDot > 0) ? fileName.substring(lastDot + 1).toLowerCase() : "";
+        return (lastDot > 0) ? fileName.substring(lastDot + 1).toUpperCase() : "";
+    }
+
+    private void parseHelper(int col1, int col2, int col3, FileInputStream fis, Workbook workbook, Sheet sheet, Stack<File> stack, int rowNum) throws IOException {
+        int filesParsed = 0;
+        while (!stack.isEmpty()) {
+            File currentFile = stack.pop();
+            if (currentFile.isDirectory()) {
+                for (File f : currentFile.listFiles()) {
+                    stack.push(f);
+                }
+            } else if (currentFile.getName().toLowerCase().endsWith(".zip")) {
+                ZipFile zipFile = new ZipFile(currentFile);
+                Enumeration<? extends ZipEntry> entries = zipFile.entries();
+                while (entries.hasMoreElements()) {
+                    ZipEntry entry = entries.nextElement();
+
+                    long timeMillis = entry.getTime();
+                    Calendar cal = Calendar.getInstance();
+                    cal.setTimeInMillis(timeMillis);
+                    int year = cal.get(Calendar.YEAR);
+
+                    if (year > IGNORE_YEAR) continue;
+
+                    String fileName = entry.getName();
+                    String deliverable = getDeliverableName(fileName);
+                    String docType = getFileExtension(fileName);
+
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(col1).setCellValue(String.valueOf(year));  //E
+                    row.createCell(col2).setCellValue(deliverable); //F
+                    row.createCell(col3).setCellValue(docType); // H
+                    System.out.println("Parsed File " + ++filesParsed + ": "  + fileName);
+                }
+                zipFile.close();
+            } else {
+                Calendar cal = Calendar.getInstance();
+                cal.setTime(new Date(currentFile.lastModified()));
+                int year = cal.get(Calendar.YEAR);
+
+                if (year > IGNORE_YEAR) continue;
+
+                String fileName = currentFile.getName();
+                String deliverable = getDeliverableName(fileName);
+                String docType = getFileExtension(fileName).toUpperCase();
+
+                Row row = sheet.createRow(rowNum++);
+                row.createCell(col1).setCellValue(String.valueOf(year));  //E
+                row.createCell(col2).setCellValue(deliverable); //F
+                row.createCell(col3).setCellValue(docType); // H
+                System.out.println("Parsed File " + ++filesParsed + ": "  + fileName);
+            }
+
+        }
+
+
+        fis.close();
+        FileOutputStream fos = new FileOutputStream(EXCEL_PATH);
+        workbook.write(fos);
+        fos.close();
+        workbook.close();
+
+        System.out.println("Complete");
     }
 }
