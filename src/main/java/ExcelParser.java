@@ -16,18 +16,20 @@ public class ExcelParser {
     private final String FOLDER_PATH;
     private final String SHEET_NAME;
     private final int IGNORE_YEAR; // Ignores
+    private final HashSet<String> zipsParsed = new HashSet<>();
     private final ArrayList<String> newExtensions = new ArrayList<>();
     private final HashSet<String> knownExtensions = new HashSet<>(Arrays.asList(
             "XLS", "XSLX", "XLSM", "XLAM", "DOC", "DOCX", "PPTX", "PPTM", "PPT", "JPG", "PDF", "PNG", "TXT"
     ));
 
-    private final HashSet<String> zipsParsed = new HashSet<>();
+    private int filesParsed;
 
     public ExcelParser(String excelPath, String folderPath, String sheetName) {
         EXCEL_PATH = excelPath;
         FOLDER_PATH = folderPath;
         SHEET_NAME = sheetName;
         IGNORE_YEAR = 9999;
+        filesParsed = 0;
     }
 
     public ExcelParser(String excelPath, String folderPath, String sheetName, int ignoreYear) {
@@ -35,6 +37,7 @@ public class ExcelParser {
         FOLDER_PATH = folderPath;
         SHEET_NAME = sheetName;
         IGNORE_YEAR = ignoreYear;
+        filesParsed = 0;
     }
 
     /**
@@ -152,16 +155,19 @@ public class ExcelParser {
     }
 
     private void processFile(File file, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) throws IOException {
-        if (file.isDirectory()) {
-            for (File f : file.listFiles()) {
-                processFile(f, sheet, col1, col2, col3, rowCounter);
-            }
-        } else if (file.getName().toLowerCase().endsWith(".zip")) {
+         if (file.getName().toLowerCase().endsWith(".zip")) {
             try (ZipFile zipFile = new ZipFile(file)) {
                 zipsParsed.add(file.getName());
+                System.out.println("PROCESSING ZIP: " + file.getName() + "\n");
                 processZip(zipFile, sheet, col1, col2, col3, rowCounter);
             }
-        } else {
+        } else if (file.isDirectory()) {
+             System.out.println("PROCESSING FOLDER: " + file.getName() + "\n");
+             for (File f : Objects.requireNonNull(file.listFiles())) {
+                 processFile(f, sheet, col1, col2, col3, rowCounter);
+             }
+             System.out.println("FOLDER PROCESSING COMPLETE\n");
+         } else {
             writeRow(file.getName(), file.lastModified(), sheet, col1, col2, col3, rowCounter);
         }
     }
@@ -210,6 +216,8 @@ public class ExcelParser {
 
 
         }
+
+        System.out.println("ZIP PROCESSING COMPLETE\n");
     }
 
     private void writeRow(String filename, long timeMillis, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) {
@@ -228,7 +236,7 @@ public class ExcelParser {
         row.createCell(col2).setCellValue(docType);
         row.createCell(col3).setCellValue(year);
 
-        System.out.println("Parsed File " + rowCounter.get() + ": " + filename);
+        System.out.println("Parsed File " + ++filesParsed + ": " + filename);
     }
 
     private String getDeliverableName(String fileName) {
