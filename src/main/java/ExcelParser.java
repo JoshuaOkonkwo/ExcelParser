@@ -21,6 +21,8 @@ public class ExcelParser {
             "XLS", "XSLX", "XLSM", "XLAM", "DOC", "DOCX", "PPTX", "PPTM", "PPT", "JPG", "PDF", "PNG", "TXT"
     ));
 
+    private final HashSet<String> zipsParsed = new HashSet<>();
+
     public ExcelParser(String excelPath, String folderPath, String sheetName) {
         EXCEL_PATH = excelPath;
         FOLDER_PATH = folderPath;
@@ -156,6 +158,7 @@ public class ExcelParser {
             }
         } else if (file.getName().toLowerCase().endsWith(".zip")) {
             try (ZipFile zipFile = new ZipFile(file)) {
+                zipsParsed.add(file.getName());
                 processZip(zipFile, sheet, col1, col2, col3, rowCounter);
             }
         } else {
@@ -166,10 +169,11 @@ public class ExcelParser {
     private void processZip(ZipFile zipFile, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) throws IOException {
         Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
 
+
         while (entries.hasMoreElements()) {
             ZipArchiveEntry entry = entries.nextElement();
 
-            if (entry.isDirectory()) continue;
+            if (entry.isDirectory() || zipsParsed.contains(entry.getName())) continue;
 
             if (entry.getName().toLowerCase().endsWith(".zip")) {
                 System.out.println("Processing Nested Zip Entry: " + entry.getName());
@@ -193,6 +197,7 @@ public class ExcelParser {
                 }
 
                 try (ZipFile nestedZip = new ZipFile(tempZip)) {
+                    zipsParsed.add(entry.getName());
                     processZip(nestedZip, sheet, col1, col2, col3, rowCounter);
                 } catch (IOException e) {
                     throw new IOException("Failure opening nested zip: " + entry.getName(), e);
