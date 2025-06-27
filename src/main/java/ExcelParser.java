@@ -3,6 +3,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -15,6 +16,10 @@ public class ExcelParser {
     private final String FOLDER_PATH;
     private final String SHEET_NAME;
     private final int IGNORE_YEAR; // Ignores
+    private final ArrayList<String> newExtensions = new ArrayList<>();
+    private final HashSet<String> knownExtensions = new HashSet<>(Arrays.asList(
+            "XLS", "XSLX", "XLSM", "XLAM", "DOC", "DOCX", "PPTX", "PPTM", "PPT", "JPG", "PDF", "PNG", "TXT"
+    ));
 
     public ExcelParser(String excelPath, String folderPath, String sheetName) {
         EXCEL_PATH = excelPath;
@@ -37,7 +42,8 @@ public class ExcelParser {
      *
      */
     public void parseSafe() {
-        parseSafe(4, 5, 7);
+        int col1 = 3, col2 = 4, col3 = 6;
+        parseSafe(col1, col2, col3);
     }
 
     /**
@@ -85,7 +91,7 @@ public class ExcelParser {
      * @param startingRow row to start writing from
      */
     public void parse(int startingRow) {
-        int col1 = 4, col2 = 5, col3 = 7;
+        int col1 = 3, col2 = 4, col3 = 6;
         parse(col1, col2, col3, startingRow);
     }
 
@@ -125,13 +131,79 @@ public class ExcelParser {
     }
 
 
+    private void parseHelper(int col1, int col2, int col3, FileInputStream fis, Workbook workbook, Sheet sheet, Stack<File> stack, int rowNum) throws IOException {
+        AtomicInteger filesParsed = new AtomicInteger(rowNum);
+        while (!stack.isEmpty()) {
+            File currentFile = stack.pop();
+            processFile(currentFile, sheet, col1, col2, col3, filesParsed);
+
+        }
+
+        fis.close();
+        FileOutputStream fos = new FileOutputStream(EXCEL_PATH);
+        workbook.write(fos);
+        fos.close();
+        workbook.close();
+
+        System.out.println("Parsing Complete. Parsed " + filesParsed + " files.");
+        System.out.println("Unrecognized extensions:" + newExtensions);
+    }
+
+    private void processFile(File file, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) throws IOException {
+        if (file.isDirectory()) {
+            for (File f : file.listFiles()) {
+                processFile(f, sheet, col1, col2, col3, rowCounter);
+            }
+        } else if (file.getName().toLowerCase().endsWith(".zip")) {
+            try (ZipFile zipFile = new ZipFile(file)) {
+                processZip(zipFile, sheet, col1, col2, col3, rowCounter);
+            }
+        } else {
+            writeRow(file.getName(), file.lastModified(), sheet, col1, col2, col3, rowCounter);
+        }
+    }
+
+    private void processZip(ZipFile zipfile, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) {
+        Enumeration<? extends ZipEntry> entries = zipfile.entries();
+
+        while (entries.hasMoreElements()) {
+            ZipEntry entry = entries.nextElement();
+
+            if (entry.isDirectory()) continue;
+
+            if (entry.getName().toLowerCase().endsWith(".zip")) {
+                System.out.println("Skipped Nested Zip Entry: " + entry.getName());
+            }
+
+            writeRow(entry.getName(), entry.getTime(), sheet, col1, col2, col3, rowCounter);
+        }
+    }
+
+    private void writeRow(String filename, long timeMillis, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(timeMillis);
+        int year = calendar.get(Calendar.YEAR);
+
+        if (year > IGNORE_YEAR) return;
+
+        String deliverableName = getDeliverableName(filename);
+        String docType = getDocType(filename);
+
+        Row row = sheet.createRow(rowCounter.getAndIncrement());
+
+        row.createCell(col1).setCellValue(deliverableName);
+        row.createCell(col2).setCellValue(docType);
+        row.createCell(col3).setCellValue(year);
+
+        System.out.println("Parsed File " + rowCounter.get() + ": " + filename);
+    }
 
     private String getDeliverableName(String fileName) {
         int lastDot = fileName.lastIndexOf('.');
         return (lastDot > 0) ? fileName.substring(0, lastDot) : fileName;
     }
 
-    private String getFileExtension(String fileName) {
+    private String getDocType(String fileName) {
         String[] excelExtensions = {"XLS", "XSLX", "XLSM", "XLAM"};
         String[] wordExtensions = {"DOC", "DOCX"};
         String[] powerpointExtensions = {"PPTX", "PPTM", "PPT"};
@@ -147,70 +219,13 @@ public class ExcelParser {
         } else if (extension.equals("MSG")) {
             return "Outlook Item";
         } else {
+
+            if (!knownExtensions.contains(extension)) {
+                newExtensions.add(extension);
+                knownExtensions.add(extension);
+            }
             return extension;
         }
 
-    }
-
-    private void parseHelper(int col1, int col2, int col3, FileInputStream fis, Workbook workbook, Sheet sheet, Stack<File> stack, int rowNum) throws IOException {
-        int filesParsed = 0;
-        while (!stack.isEmpty()) {
-            File currentFile = stack.pop();
-            if (currentFile.isDirectory()) {
-                for (File f : currentFile.listFiles()) {
-                    stack.push(f);
-                }
-            } else if (currentFile.getName().toLowerCase().endsWith(".zip")) {
-                ZipFile zipFile = new ZipFile(currentFile);
-                Enumeration<? extends ZipEntry> entries = zipFile.entries();
-                while (entries.hasMoreElements()) {
-                    ZipEntry entry = entries.nextElement();
-
-                    long timeMillis = entry.getTime();
-                    Calendar cal = Calendar.getInstance();
-                    cal.setTimeInMillis(timeMillis);
-                    int year = cal.get(Calendar.YEAR);
-
-                    if (year > IGNORE_YEAR) continue;
-
-                    String fileName = entry.getName();
-                    String deliverable = getDeliverableName(fileName);
-                    String docType = getFileExtension(fileName);
-
-                    Row row = sheet.createRow(rowNum++);
-                    row.createCell(col1).setCellValue(String.valueOf(year));  //E
-                    row.createCell(col2).setCellValue(deliverable); //F
-                    row.createCell(col3).setCellValue(docType); // H
-                    System.out.println("Parsed File " + ++filesParsed + ": "  + fileName);
-                }
-                zipFile.close();
-            } else {
-                Calendar cal = Calendar.getInstance();
-                cal.setTime(new Date(currentFile.lastModified()));
-                int year = cal.get(Calendar.YEAR);
-
-                if (year > IGNORE_YEAR) continue;
-
-                String fileName = currentFile.getName();
-                String deliverable = getDeliverableName(fileName);
-                String docType = getFileExtension(fileName).toUpperCase();
-
-                Row row = sheet.createRow(rowNum++);
-                row.createCell(col1).setCellValue(year);  //E
-                row.createCell(col2).setCellValue(deliverable); //F
-                row.createCell(col3).setCellValue(docType); // H
-                System.out.println("Parsed File " + ++filesParsed + ": "  + fileName);
-            }
-
-        }
-
-
-        fis.close();
-        FileOutputStream fos = new FileOutputStream(EXCEL_PATH);
-        workbook.write(fos);
-        fos.close();
-        workbook.close();
-
-        System.out.println("Complete. Parsed " + filesParsed + " files.");
     }
 }
