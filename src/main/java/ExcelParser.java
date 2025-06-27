@@ -182,7 +182,7 @@ public class ExcelParser {
             if (entry.isDirectory() || zipsParsed.contains(entry.getName())) continue;
 
             if (entry.getName().toLowerCase().endsWith(".zip")) {
-                System.out.println("Processing Nested Zip Entry: " + entry.getName());
+                System.out.println("PROCESSING NESTED ZIP ENTRY: " + entry.getName() + "\n");
 
                 File tempZip = File.createTempFile("nested-", ".zip");
                 tempZip.deleteOnExit();
