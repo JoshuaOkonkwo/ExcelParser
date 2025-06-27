@@ -1,11 +1,11 @@
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.commons.compress.archivers.zip.ZipFile;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
 
 
 public class ExcelParser {
@@ -163,19 +163,47 @@ public class ExcelParser {
         }
     }
 
-    private void processZip(ZipFile zipfile, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) {
-        Enumeration<? extends ZipEntry> entries = zipfile.entries();
+    private void processZip(ZipFile zipFile, Sheet sheet, int col1, int col2, int col3, AtomicInteger rowCounter) throws IOException {
+        Enumeration<ZipArchiveEntry> entries = zipFile.getEntries();
 
         while (entries.hasMoreElements()) {
-            ZipEntry entry = entries.nextElement();
+            ZipArchiveEntry entry = entries.nextElement();
 
             if (entry.isDirectory()) continue;
 
             if (entry.getName().toLowerCase().endsWith(".zip")) {
-                System.out.println("Skipped Nested Zip Entry: " + entry.getName());
+                System.out.println("Processing Nested Zip Entry: " + entry.getName());
+
+                File tempZip = File.createTempFile("nested-", ".zip");
+                tempZip.deleteOnExit();
+
+                try (InputStream is = zipFile.getInputStream(entry)) {
+
+                    try (FileOutputStream fos = new FileOutputStream(tempZip)) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+
+                        while ((bytesRead = is.read(buffer)) != -1) {
+                            fos.write(buffer, 0, bytesRead);
+                        }
+                    }
+
+                } catch (IOException e) {
+                    throw new IOException("Failure creating nested zip: " + entry.getName(), e);
+                }
+
+                try (ZipFile nestedZip = new ZipFile(tempZip)) {
+                    processZip(nestedZip, sheet, col1, col2, col3, rowCounter);
+                } catch (IOException e) {
+                    throw new IOException("Failure opening nested zip: " + entry.getName(), e);
+                }
+
+
+            } else {
+                writeRow(entry.getName(), entry.getTime(), sheet, col1, col2, col3, rowCounter);
             }
 
-            writeRow(entry.getName(), entry.getTime(), sheet, col1, col2, col3, rowCounter);
+
         }
     }
 
